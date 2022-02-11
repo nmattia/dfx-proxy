@@ -5,52 +5,104 @@ import morgan from "morgan";
 import { createProxyMiddleware } from "http-proxy-middleware";
 
 type CanisterId = string;
+type CanisterName = string;
 
 type Port = number;
 
-interface CLIArguments {
-  replicaHost: string;
-  canistersToPorts: Record<CanisterId, Port>;
+interface Config {
+  replicaHost?: string;
+  canisterIdToPort: Record<CanisterId, Port>;
+  canisterNameToPort: Record<CanisterName, Port>;
+  canisterNameToId: Record<CanisterName, CanisterId>;
 }
 
 // Parse all the arguments, returning an error string if parsing failed.
-const parseArgs = (args: string[]): CLIArguments | string => {
+const getConfig = (origArgs: string[]): Config | string => {
+  let args = origArgs;
+  return parseArgs(args);
+};
+
+const parseArgs = (origArgs: string[]): Config | string => {
+  let args = origArgs;
+  let replicaHost;
+
   // Ensure '--replica-host http://...' was specified
   const replicaArgIndex = args.indexOf("--replica-host");
-  if (replicaArgIndex == -1) {
-    return "Please specify --replica-host";
+  if (replicaArgIndex !== -1) {
+    // Remove the '--replica-host http://...' from the args and store the value
+    const replicaArgs = args.splice(replicaArgIndex, 2);
+    if (replicaArgs.length != 2) {
+      return "No value for --replica-host";
+    }
+    replicaHost = replicaArgs[1];
   }
-
-  // Remove the '--replica-host http://...' from the args and store the value
-  const replicaArgs = args.splice(replicaArgIndex, 2);
-  if (replicaArgs.length != 2) {
-    return "No value for --replica-host";
-  }
-  const [_, replicaHost] = replicaArgs;
 
   // Parse the rest of the args as canister/port mappings
-  const canistersToPorts = parsePortMappings(args);
-
-  if (typeof canistersToPorts === "string") {
-    return canistersToPorts;
-  } else {
-    return { replicaHost, canistersToPorts };
+  //
+  const result = parseCanisterIdToPort(args);
+  if (typeof result === "string") {
+    return result;
   }
+  let canisterIdToPort = result[0];
+  args = result[1];
+
+  const result_ = parseCanisterNameToPort(args);
+  if (typeof result_ === "string") {
+    return result_;
+  }
+  let canisterNameToPort = result_[0];
+  args = result_[1];
+
+  if (args.length != 0) {
+    return `Error: Don't know what to do with ${args.length} argument(s): ${args}`;
+  }
+
+  return {
+    replicaHost,
+    canisterIdToPort,
+    canisterNameToPort,
+    canisterNameToId: {},
+  };
 };
 
 // Parse the canister ID to port mappings (rwajt-...:8086 rdm6x-...:443 ...)
-const parsePortMappings = (
+const parseCanisterIdToPort = (
   args: string[]
-): Record<CanisterId, Port> | string => {
-  const canistersToPorts: Record<CanisterId, Port> = {};
-  for (const arg of args) {
+): [Record<CanisterName, Port>, string[]] | string =>
+  parseCanisterToPort("--by-id", args);
+
+// Parse the canister name to port mappings (my-canister:8086 assets:443 ...)
+const parseCanisterNameToPort = (
+  args: string[]
+): [Record<CanisterName, Port>, string[]] | string =>
+  parseCanisterToPort("--by-name", args);
+
+// Parse the canister name to port mappings (my-canister:8086 assets:443 ...)
+const parseCanisterToPort = (
+  param: string,
+  args: string[]
+): [Record<string, Port>, string[]] | string => {
+  const canisterToPort: Record<string, Port> = {};
+
+  for (
+    let canisterToPortArgIndex;
+    (canisterToPortArgIndex = args.indexOf(param)) != -1;
+
+  ) {
+    const canisterToPortArgs = args.splice(canisterToPortArgIndex, 2);
+    if (canisterToPortArgs.length != 2) {
+      return `No value for ${param}`;
+    }
+
+    const [_, arg] = canisterToPortArgs;
+
     const tokens = arg.split(":");
 
     if (tokens.length != 2) {
       return `Could not parse '${arg}'`;
     }
 
-    const [canisterId, portStr] = tokens;
+    const [canister, portStr] = tokens;
 
     const port = parseInt(portStr);
 
@@ -58,10 +110,10 @@ const parsePortMappings = (
       return `Could not parse port '${portStr}' as number`;
     }
 
-    canistersToPorts[canisterId] = port;
+    canisterToPort[canister] = port;
   }
 
-  return canistersToPorts;
+  return [canisterToPort, args];
 };
 
 // An app that:
@@ -130,33 +182,68 @@ const mkApp = ({
 
 const usage = "USAGE: proxy --replica-host http://... [<canister-id>:<port>]";
 
-const args = process.argv.slice(2);
+const main = () => {
+  const args = process.argv.slice(2);
 
-if (args.indexOf("--help") != -1) {
-  console.log(usage);
-  process.exit(0);
-}
+  if (args.indexOf("--help") != -1) {
+    console.log(usage);
+    process.exit(0);
+  }
 
-const parsed = parseArgs(args);
+  const parsed = getConfig(args);
 
-if (typeof parsed === "string") {
-  console.log(parsed);
-  console.log(usage);
-  process.exit(1);
-}
+  if (typeof parsed === "string") {
+    console.log(parsed);
+    console.log(usage);
+    process.exit(1);
+  }
 
-const { replicaHost, canistersToPorts } = parsed;
+  let { replicaHost, canisterNameToPort, canisterNameToId, canisterIdToPort } =
+    parsed;
 
-if (Object.keys(canistersToPorts).length == 0) {
-  console.log("No canisters to proxy");
-  console.log(usage);
-  process.exit(1);
-}
+  for (let canisterName in canisterNameToPort) {
+    console.log(canisterName);
+    let canisterPort = canisterNameToPort[canisterName];
+    let canisterId = canisterNameToId[canisterName];
 
-for (const canisterId in canistersToPorts) {
-  const port = canistersToPorts[canisterId];
-  console.log(
-    `Forwarding ${port} to ${replicaHost}/?canisterId=${canisterId}`
-  );
-  mkApp({ replicaHost, port, canisterId });
-}
+    if (!canisterId) {
+      console.log(
+        `No canister ID for canister name ${canisterName} when trying to proxy ${canisterName} to port ${canisterPort}`
+      );
+      console.log(usage);
+      process.exit(1);
+    }
+
+    if (canisterIdToPort[canisterId]) {
+      console.log(
+        `Asking to forward canister '${canisterName}' (name) to port ${canisterPort} but '${canisterName}' is '${canisterId}' (ID) and is already forwarded to port ${canisterIdToPort[canisterId]}`
+      );
+      console.log(usage);
+      process.exit(1);
+    }
+
+    canisterIdToPort[canisterId] = canisterPort;
+  }
+
+  if (Object.keys(canisterIdToPort).length == 0) {
+    console.log("No canisters to proxy");
+    console.log(usage);
+    process.exit(1);
+  }
+
+  if (!replicaHost) {
+    console.log("No replica to proxy to"); // TODO: explain how
+    console.log(usage);
+    process.exit(1);
+  }
+
+  for (const canisterId in canisterIdToPort) {
+    const port = canisterIdToPort[canisterId];
+    console.log(
+      `Forwarding ${port} to ${replicaHost}/?canisterId=${canisterId}`
+    );
+    mkApp({ replicaHost, port, canisterId });
+  }
+};
+
+main();
