@@ -145,16 +145,18 @@ if (typeof parsed === "string") {
   process.exit(1);
 }
 
-if (Object.keys(parsed.canistersToPorts).length == 0) {
+const { replicaHost, canistersToPorts } = parsed;
+
+if (Object.keys(canistersToPorts).length == 0) {
   console.log("No canisters to proxy");
   console.log(usage);
   process.exit(1);
 }
 
-for (const canisterId in parsed.canistersToPorts) {
-  const port = parsed.canistersToPorts[canisterId];
+for (const canisterId in canistersToPorts) {
+  const port = canistersToPorts[canisterId];
   console.log(
-    `Forwarding ${port} to ${parsed.replicaHost}/?canisterId=${canisterId}`
+    `Forwarding ${port} to ${replicaHost}/?canisterId=${canisterId}`
   );
-  mkApp({ replicaHost: parsed.replicaHost, port, canisterId });
+  mkApp({ replicaHost, port, canisterId });
 }
