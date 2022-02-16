@@ -3,6 +3,7 @@
 import express from "express";
 import morgan from "morgan";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import { readFileSync } from "fs";
 
 type CanisterId = string;
 type CanisterName = string;
@@ -14,6 +15,7 @@ interface Config {
   canisterIdToPort: Record<CanisterId, Port>;
   canisterNameToPort: Record<CanisterName, Port>;
   canisterNameToId: Record<CanisterName, CanisterId>;
+  canisterIdsFile?: string;
 }
 
 // Parse all the arguments, returning an error string if parsing failed.
@@ -25,8 +27,9 @@ const getConfig = (origArgs: string[]): Config | string => {
 const parseArgs = (origArgs: string[]): Config | string => {
   let args = origArgs;
   let replicaHost;
+  let canisterIdsFile;
 
-  // Ensure '--replica-host http://...' was specified
+  // Read CLI value for replica host
   const replicaArgIndex = args.indexOf("--replica-host");
   if (replicaArgIndex !== -1) {
     // Remove the '--replica-host http://...' from the args and store the value
@@ -35,6 +38,17 @@ const parseArgs = (origArgs: string[]): Config | string => {
       return "No value for --replica-host";
     }
     replicaHost = replicaArgs[1];
+  }
+
+  // Read CLI value for canister_ids.json
+  const canisterIdsFileIndex = args.indexOf("--canister-ids-file");
+  if (canisterIdsFileIndex !== -1) {
+    // Remove the '--canister-ids-file canister_ids.json' from the args and store the value
+    const canisterIdsArgs = args.splice(canisterIdsFileIndex, 2);
+    if (canisterIdsArgs.length != 2) {
+      return "No value for --canister-ids-file";
+    }
+    canisterIdsFile = canisterIdsArgs[1];
   }
 
   // Parse the rest of the args as canister/port mappings
@@ -59,6 +73,7 @@ const parseArgs = (origArgs: string[]): Config | string => {
 
   return {
     replicaHost,
+    canisterIdsFile,
     canisterIdToPort,
     canisterNameToPort,
     canisterNameToId: {},
@@ -198,17 +213,53 @@ const main = () => {
     process.exit(1);
   }
 
-  let { replicaHost, canisterNameToPort, canisterNameToId, canisterIdToPort } =
-    parsed;
+  let {
+    replicaHost,
+    canisterIdsFile,
+    canisterNameToPort,
+    canisterNameToId,
+    canisterIdToPort,
+  } = parsed;
+
+  if (Object.keys(canisterIdToPort).length == 0) {
+    console.log("No canisters to proxy");
+    console.log(usage);
+    process.exit(1);
+  }
+
+  if (!replicaHost) {
+    console.log("No replica to proxy to"); // TODO: explain how
+    console.log(usage);
+    process.exit(1);
+  }
+
+  if (canisterIdsFile) {
+    console.log("Canister ids file");
+
+    try {
+      const content = readFileSync(canisterIdsFile, "utf8");
+      const values = JSON.parse(content);
+      for (const canisterName in values) {
+        const localCanisterId = values[canisterName].local;
+        if (localCanisterId) {
+          canisterNameToId[canisterName] = localCanisterId;
+        }
+      }
+    } catch (e) {
+      console.log(`Could not read canister IDs from file ${canisterIdsFile}`);
+      console.log(e);
+      console.log(usage);
+      process.exit(1);
+    }
+  }
 
   for (let canisterName in canisterNameToPort) {
-    console.log(canisterName);
     let canisterPort = canisterNameToPort[canisterName];
     let canisterId = canisterNameToId[canisterName];
 
     if (!canisterId) {
       console.log(
-        `No canister ID for canister name ${canisterName} when trying to proxy ${canisterName} to port ${canisterPort}`
+        `No canister ID for canister name '${canisterName}' when trying to proxy '${canisterName}' to port ${canisterPort}`
       );
       console.log(usage);
       process.exit(1);
@@ -225,17 +276,9 @@ const main = () => {
     canisterIdToPort[canisterId] = canisterPort;
   }
 
-  if (Object.keys(canisterIdToPort).length == 0) {
-    console.log("No canisters to proxy");
-    console.log(usage);
-    process.exit(1);
-  }
+  console.log("Using the following mappings:");
 
-  if (!replicaHost) {
-    console.log("No replica to proxy to"); // TODO: explain how
-    console.log(usage);
-    process.exit(1);
-  }
+  console.log(canisterIdToPort);
 
   for (const canisterId in canisterIdToPort) {
     const port = canisterIdToPort[canisterId];
