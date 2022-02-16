@@ -221,18 +221,6 @@ const main = () => {
     canisterIdToPort,
   } = parsed;
 
-  if (Object.keys(canisterIdToPort).length == 0) {
-    console.log("No canisters to proxy");
-    console.log(usage);
-    process.exit(1);
-  }
-
-  if (!replicaHost) {
-    console.log("No replica to proxy to"); // TODO: explain how
-    console.log(usage);
-    process.exit(1);
-  }
-
   if (canisterIdsFile) {
     console.log("Canister ids file");
 
@@ -274,6 +262,18 @@ const main = () => {
     }
 
     canisterIdToPort[canisterId] = canisterPort;
+  }
+
+  if (Object.keys(canisterIdToPort).length == 0) {
+    console.log("No canisters to proxy");
+    console.log(usage);
+    process.exit(1);
+  }
+
+  if (!replicaHost) {
+    console.log("No replica to proxy to"); // TODO: explain how
+    console.log(usage);
+    process.exit(1);
   }
 
   console.log("Using the following mappings:");
