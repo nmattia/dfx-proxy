@@ -197,30 +197,7 @@ const mkApp = ({
 
 const usage = "USAGE: proxy --replica-host http://... [<canister-id>:<port>]";
 
-const main = () => {
-  const args = process.argv.slice(2);
-
-  if (args.indexOf("--help") != -1) {
-    console.log(usage);
-    process.exit(0);
-  }
-
-  const parsed = getConfig(args);
-
-  if (typeof parsed === "string") {
-    console.log(parsed);
-    console.log(usage);
-    process.exit(1);
-  }
-
-  let {
-    replicaHost,
-    canisterIdsFile,
-    canisterNameToPort,
-    canisterNameToId,
-    canisterIdToPort,
-  } = parsed;
-
+export const serve = ({ replicaHost, canisterIdsFile, canisterNameToPort, canisterNameToId, canisterIdToPort}: Config): void => {
   if (canisterIdsFile) {
     console.log("Canister ids file");
 
@@ -287,6 +264,26 @@ const main = () => {
     );
     mkApp({ replicaHost, port, canisterId });
   }
+
+}
+
+const main = () => {
+  const args = process.argv.slice(2);
+
+  if (args.indexOf("--help") != -1) {
+    console.log(usage);
+    process.exit(0);
+  }
+
+  const parsed = getConfig(args);
+
+  if (typeof parsed === "string") {
+    console.log(parsed);
+    console.log(usage);
+    process.exit(1);
+  }
+
+  serve(parsed);
 };
 
 main();
